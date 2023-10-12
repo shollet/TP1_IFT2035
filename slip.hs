@@ -194,10 +194,63 @@ data Lexp = Llit Int             -- Litéral entier.
 -- Conversion de Sexp à Lambda --------------------------------------------
 
 s2l :: Sexp -> Lexp
-s2l (Snum n) = Llit n
-s2l (Ssym s) = Lid s
--- ¡¡ COMPLETER !!
-s2l se = error ("Expression Slip inconnue: " ++ (showSexp se))
+s2l (Snum n) = Llit n   -- Convertit en litéral entier.
+
+s2l (Ssym s) = Lid s    -- Convertit en référence à une variable.    
+
+s2l (Snode (Ssym "lambda") [Snode (Ssym x) [] , e]) = Labs x (s2l e)   -- Convertit un argument en fonction anonyme.
+s2l (Snode (Ssym "lambda") [Snode (Ssym x) xs, e]) =             -- Convertit plusieurs arguments en fonction anonyme.  
+    Lrec (map extractSymAndConvert (Ssym x : xs)) (s2l e)
+  where
+    extractSymAndConvert :: Sexp -> (Var, Lexp)
+    extractSymAndConvert (Ssym x') = (x', Lid x')
+    extractSymAndConvert _        = error "Expected Ssym in lambda args"
+s2l (Snode (Ssym "lambda") _) = error "Mauvais nombre d'arguments"  -- Gestion d'erreurs pour les lambdas mal formées.
+
+s2l (Snode (Ssym "if") [e1, e2, e3]) = Lite (s2l e1) (s2l e2) (s2l e3)  -- Convertit un if/then/else.
+s2l (Snode (Ssym "if") _) = error "Mauvais nombre d'arguments"  -- Gestion d'erreurs pour les if mal formées.
+
+s2l (Snode (Ssym "let") [Snode (Ssym x) [], e1, e2]) = Ldec x (s2l e1) (s2l e2) -- Convertit un let/in.
+s2l (Snode (Ssym "let") [Snode (Ssym x) xs, _, e2]) =          -- Convertit plusieurs let/in. 
+    Lrec (map extractSymAndConvert (Ssym x : xs)) (s2l e2) 
+  where
+    extractSymAndConvert :: Sexp -> (Var, Lexp)
+    extractSymAndConvert (Ssym x') = (x', Lid x')   
+    extractSymAndConvert _        = error "Expected Ssym in let args"
+s2l (Snode (Ssym "let") _) = error "Mauvais nombre d'arguments" -- Gestion d'erreurs pour les let mal formées.
+
+s2l (Snode (Ssym "set!") [e1, e2]) = Lassign (s2l e1) (s2l e2)
+s2l (Snode (Ssym "set!") _) = error "Mauvais nombre d'arguments"
+s2l (Snode (Ssym "begin") []) = error "begin sans arguments"
+s2l (Snode (Ssym "begin") [e]) = s2l e
+s2l (Snode (Ssym "begin") (e : es)) = Lassign (s2l e) (s2l (Snode (Ssym "begin") es))
+s2l (Snode (Ssym "quote") [e]) = s2l e
+s2l (Snode (Ssym "quote") _) = error "Mauvais nombre d'arguments"
+s2l (Snode (Ssym "cons") [e1, e2]) = Lfuncall (Lid "cons") [s2l e1, s2l e2]
+s2l (Snode (Ssym "cons") _) = error "Mauvais nombre d'arguments"
+s2l (Snode (Ssym "car") [e]) = Lfuncall (Lid "car") [s2l e]
+s2l (Snode (Ssym "car") _) = error "Mauvais nombre d'arguments"
+s2l (Snode (Ssym "cdr") [e]) = Lfuncall (Lid "cdr") [s2l e]
+s2l (Snode (Ssym "cdr") _) = error "Mauvais nombre d'arguments"
+s2l (Snode (Ssym "ref!") [e]) = Lmkref (s2l e)
+s2l (Snode (Ssym "ref!") _) = error "Mauvais nombre d'arguments"
+s2l (Snode (Ssym "deref") [e]) = Lderef (s2l e)
+s2l (Snode (Ssym "deref") _) = error "Mauvais nombre d'arguments"
+s2l (Snode (Ssym "setref!") [e1, e2]) = Lassign (s2l e1) (s2l e2)
+s2l (Snode (Ssym "setref!") _) = error "Mauvais nombre d'arguments"
+s2l (Snode (Ssym "letrec") [Snode (Ssym x) [], e1, e2]) =
+    Lrec [(x, Lfuncall (Lid "fix") [Labs x (s2l e1)])] (s2l e2)
+s2l (Snode (Ssym "letrec") [Snode (Ssym x) xs, e1, e2]) =
+    let vars = x : map (\(Ssym s) -> s) xs
+    in Lrec (map (, Lfuncall (Lid "fix") [Labs x (s2l e1)]) vars) (s2l e2)
+s2l (Snode (Ssym "letrec") _) = error "Mauvais nombre d'arguments"
+s2l (Snode (Ssym "fix") [Snode (Ssym x) [], e]) =
+    Lrec [(x, Lfuncall (Lid "fix") [Labs x (s2l e)])] (Lid x)
+s2l (Snode (Ssym "fix") [Snode (Ssym x) xs, e]) =
+    let vars = x : map (\(Ssym s) -> s) xs
+    in Lrec (map (\x' -> (x', Lfuncall (Lid "fix") [Labs x (s2l e)])) vars) (Lid x)
+s2l (Snode (Ssym "fix") _) = error "Mauvais nombre d'arguments"
+s2l se = error ("Expression Slip inconnue: " ++ showSexp se)
 
 ---------------------------------------------------------------------------
 -- Représentation du contexte d'exécution                                --
