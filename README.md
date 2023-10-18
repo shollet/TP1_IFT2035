@@ -14,9 +14,9 @@ ghci> s2l (Ssym "hello")    -- "hello"
 ->Lid "hello"
 
 
-ghci> s2l (Snode (Ssym "lambda") [Snode (Ssym "x") [], Snum 5])     -- (lambda x 5)
+ghci> s2l (Snode (Ssym "λ") [Snode (Ssym "x") [], Snum 5])     -- (λ x 5)
 ->Labs "x" (Llit 5)
-ghci> s2l (Snode (Ssym "lambda") [Snode (Ssym "x") [], Snode (Ssym "lambda") [Snode (Ssym "y") [], Snum 5]])     -- (lambda x (lambda y 5))
+ghci> s2l (Snode (Ssym "λ") [Snode (Ssym "x") [], Snode (Ssym "lambda") [Snode (Ssym "y") [], Snum 5]])     -- (λ x (λ y 5))
 ->Labs "x" (Labs "y" (Llit 5))
 
 
