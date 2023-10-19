@@ -1,6 +1,5 @@
 -- TP-2  --- Implantation d'une sorte de Lisp          -*- coding: utf-8 -*-
 {-# OPTIONS_GHC -Wall #-}
-{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 
 -- Ce fichier défini les fonctionalités suivantes:
 -- - Analyseur lexical
@@ -195,62 +194,37 @@ data Lexp = Llit Int             -- Litéral entier.
 -- Conversion de Sexp à Lambda --------------------------------------------
 
 s2l :: Sexp -> Lexp
-s2l (Snum n) = Llit n   -- Convertit en litéral entier.
-
-s2l (Ssym s) = Lid s    -- Convertit en référence à une variable.    
-
-s2l (Snode (Ssym "lambda") [Snode (Ssym x) [] , e]) = Labs x (s2l e)   -- Convertit un argument en fonction anonyme.
-s2l (Snode (Ssym "lambda") [Snode (Ssym x) xs, e]) =             -- Convertit plusieurs arguments en fonction anonyme.  
-    Lrec (map extractSymAndConvert (Ssym x : xs)) (s2l e)
-  where
-    extractSymAndConvert :: Sexp -> (Var, Lexp)
-    extractSymAndConvert (Ssym x') = (x', Lid x')
-    extractSymAndConvert _        = error "Expected Ssym in lambda args"
-s2l (Snode (Ssym "lambda") _) = error "Mauvais nombre d'arguments"  -- Gestion d'erreurs pour les lambdas mal formées.
-
-s2l (Snode (Ssym "if") [e1, e2, e3]) = Lite (s2l e1) (s2l e2) (s2l e3)  -- Convertit un if/then/else.
-s2l (Snode (Ssym "if") _) = error "Mauvais nombre d'arguments"  -- Gestion d'erreurs pour les if mal formées.
-
-s2l (Snode (Ssym "let") [Snode (Ssym x) [], e1, e2]) = Ldec x (s2l e1) (s2l e2) -- Convertit un let/in.
-s2l (Snode (Ssym "let") [Snode (Ssym x) xs, _, e2]) =          -- Convertit plusieurs let/in. 
-    Lrec (map extractSymAndConvert (Ssym x : xs)) (s2l e2)
-  where
-    extractSymAndConvert :: Sexp -> (Var, Lexp)
-    extractSymAndConvert (Ssym x') = (x', Lid x')
-    extractSymAndConvert _        = error "Expected Ssym in let args"
-s2l (Snode (Ssym "let") _) = error "Mauvais nombre d'arguments" -- Gestion d'erreurs pour les let mal formées.
-
-s2l (Snode (Ssym "set!") [e1, e2]) = Lassign (s2l e1) (s2l e2)
-s2l (Snode (Ssym "set!") _) = error "Mauvais nombre d'arguments"
-s2l (Snode (Ssym "begin") []) = error "begin sans arguments"
-s2l (Snode (Ssym "begin") [e]) = s2l e
-s2l (Snode (Ssym "begin") (e : es)) = Lassign (s2l e) (s2l (Snode (Ssym "begin") es))
-s2l (Snode (Ssym "quote") [e]) = s2l e
-s2l (Snode (Ssym "quote") _) = error "Mauvais nombre d'arguments"
-s2l (Snode (Ssym "cons") [e1, e2]) = Lfuncall (Lid "cons") [s2l e1, s2l e2]
-s2l (Snode (Ssym "cons") _) = error "Mauvais nombre d'arguments"
-s2l (Snode (Ssym "car") [e]) = Lfuncall (Lid "car") [s2l e]
-s2l (Snode (Ssym "car") _) = error "Mauvais nombre d'arguments"
-s2l (Snode (Ssym "cdr") [e]) = Lfuncall (Lid "cdr") [s2l e]
-s2l (Snode (Ssym "cdr") _) = error "Mauvais nombre d'arguments"
+-- Un entier signé en décimal. (e ::= n)
+s2l (Snum n) = Llit n   
+-- Une variable (e ::= x)
+s2l (Ssym s) = Lid s    
+-- Une fonction avec un argument (e ::= (lambda x e))
+s2l (Snode (Ssym "λ") [Snode (Ssym x) [], e]) = Labs x (s2l e)  
+-- Construction d’une ref-cell (e ::= (ref! e))
 s2l (Snode (Ssym "ref!") [e]) = Lmkref (s2l e)
-s2l (Snode (Ssym "ref!") _) = error "Mauvais nombre d'arguments"
-s2l (Snode (Ssym "deref") [e]) = Lderef (s2l e)
-s2l (Snode (Ssym "deref") _) = error "Mauvais nombre d'arguments"
-s2l (Snode (Ssym "setref!") [e1, e2]) = Lassign (s2l e1) (s2l e2)
-s2l (Snode (Ssym "setref!") _) = error "Mauvais nombre d'arguments"
-s2l (Snode (Ssym "letrec") [Snode (Ssym x) [], e1, e2]) =
-    Lrec [(x, Lfuncall (Lid "fix") [Labs x (s2l e1)])] (s2l e2)
-s2l (Snode (Ssym "letrec") [Snode (Ssym x) xs, e1, e2]) =
-    let vars = x : map (\(Ssym s) -> s) xs -- il y a un probleme ici
-    in Lrec (map (, Lfuncall (Lid "fix") [Labs x (s2l e1)]) vars) (s2l e2)
-s2l (Snode (Ssym "letrec") _) = error "Mauvais nombre d'arguments"
-s2l (Snode (Ssym "fix") [Snode (Ssym x) [], e]) =
-    Lrec [(x, Lfuncall (Lid "fix") [Labs x (s2l e)])] (Lid x)
-s2l (Snode (Ssym "fix") [Snode (Ssym x) xs, e]) =
-    let vars = x : map (\(Ssym s) -> s) xs -- l y a un probleme ici
-    in Lrec (map (\x' -> (x', Lfuncall (Lid "fix") [Labs x (s2l e)])) vars) (Lid x) -- il y a une manière plus simple mais c pas dans le tp
-s2l (Snode (Ssym "fix") _) = error "Mauvais nombre d'arguments"
+-- Chercher la valeur de la ref-cell e (e ::= (get! e))
+s2l (Snode (Ssym "get!") [e]) = Lderef (s2l e)
+-- Changer la valeur de la ref-cell e1 (e ::= (set! e1 e2))
+s2l (Snode (Ssym "set!") [e1, e2]) = Lassign (s2l e1) (s2l e2)
+-- Opérations arithmétiques prédéfinies (e ::= (+) | (-) | (*) | (/))
+s2l (Snode (Ssym "+") [e1, e2]) = Lfuncall (Lid "+") [s2l e1, s2l e2]
+s2l (Snode (Ssym "-") [e1, e2]) = Lfuncall (Lid "-") [s2l e1, s2l e2]
+s2l (Snode (Ssym "*") [e1, e2]) = Lfuncall (Lid "*") [s2l e1, s2l e2]
+s2l (Snode (Ssym "/") [e1, e2]) = Lfuncall (Lid "/") [s2l e1, s2l e2]
+-- Opérations booléennes sur les entiers (e ::= (<) | (>) | (=) | (<=) | (>=))
+s2l (Snode (Ssym "<") [e1, e2]) = Lfuncall (Lid "<") [s2l e1, s2l e2]
+s2l (Snode (Ssym ">") [e1, e2]) = Lfuncall (Lid ">") [s2l e1, s2l e2]
+s2l (Snode (Ssym "=") [e1, e2]) = Lfuncall (Lid "=") [s2l e1, s2l e2]
+s2l (Snode (Ssym "<=") [e1, e2]) = Lfuncall (Lid "<=") [s2l e1, s2l e2]
+s2l (Snode (Ssym ">=") [e1, e2]) = Lfuncall (Lid ">=") [s2l e1, s2l e2]
+-- Si e1 alors e2 sinon e3 (e ::= (if e1 e2 e3))
+s2l (Snode (Ssym "if") [e1, e2, e3]) = Lite (s2l e1) (s2l e2) (s2l e3)
+-- Déclaration locale simple (e ::= (let x e1 e2))
+s2l (Snode (Ssym "let") [Snode (Ssym x) [], e1, e2]) = Ldec x (s2l e1) (s2l e2)
+-- Déclarations locales récursives (e ::= (letrec ((x1 e1) (x2 e2) ... (xn en)) e)
+s2l (Snode (Ssym "letrec") [Snode (Ssym x) [], e1, e2]) = Lrec [(x, s2l e1)] (s2l e2)
+-- Un appel de fonction (curried) (e ::= (e0 e1 e2 ... en))
+s2l (Snode e0 es) = Lfuncall (s2l e0) (map s2l es)
 s2l se = error ("Expression Slip inconnue: " ++ showSexp se)
 
 ---------------------------------------------------------------------------
@@ -279,8 +253,6 @@ hinsert Hempty p v = hinsert (Hnode Nothing Hempty Hempty) p v
 hinsert (Hnode mv e o) p v
     | even p = Hnode mv (hinsert e (p `div` 2) v) o
     | otherwise = Hnode mv e (hinsert o (p `div` 2) v)
-
-
 
 -- Représentation de l'environnement --------------------------------------
 
@@ -317,7 +289,7 @@ instance Show Value where
 type Env = Map Var Value
 
 -- L'environnement initial qui contient les fonctions prédéfinies.
-
+            
 env0 :: Env
 env0 = let binop :: (Value -> Value -> Value) -> Value
            binop op = Vfun (\ (s1, v1)
@@ -357,36 +329,12 @@ eval s _env (Llit n) = (s, Vnum n)
 -- ¡¡ COMPLETER !!
 eval s env (Lid var) = (s, mlookup env var)
 eval s env (Labs var e) = (s, Vfun (\(s', arg) -> eval s' (madd env var arg) e))
-eval s env (Lfuncall e es) = 
-    let (s1, Vfun f) = eval s env e
-        evalArgs :: LState -> Env -> [Lexp] -> (LState, [Value])
-        evalArgs s env [] = (s, [])
-        evalArgs s env (e' : es') = (s, )
-    
-
-
-
-{-
-data Value = Vnum Int
-           | Vbool Bool
-           | Vref Int
-           | Vfun ((LState, Value) -> (LState, Value))
-
-data Lexp = Llit Int             -- Litéral entier.
-          | Lid Var              -- Référence à une variable.
-          | Labs Var Lexp        -- Fonction anonyme prenant un argument.
-          | Lfuncall Lexp [Lexp] -- Appel de fonction, avec arguments "curried".
-          | Lmkref Lexp          -- Construire une "ref-cell".
-          | Lderef Lexp          -- Chercher la valeur d'une "ref-cell".
-          | Lassign Lexp Lexp    -- Changer la valeur d'une "ref-cell".
-          | Lite Lexp Lexp Lexp  -- If/then/else.
-          | Ldec Var Lexp Lexp   -- Déclaration locale non-récursive.
-          -- Déclaration d'une liste de variables qui peuvent être
-          -- mutuellement récursives.
-          | Lrec [(Var, Lexp)] Lexp
-          deriving (Show, Eq)
--}
-
+eval s env (Lfuncall e es) =
+  let (s', Vfun f) = eval s env e
+      (s'', args) = foldr (\st ex -> eval st env ex) s' es
+  in f (s'', args) -- a refaire
+-- il y a d'autres cas à traiter
+                  
 ---------------------------------------------------------------------------
 -- Toplevel                                                              --
 ---------------------------------------------------------------------------
