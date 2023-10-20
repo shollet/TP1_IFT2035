@@ -15,6 +15,7 @@ import Text.ParserCombinators.Parsec -- Librairie d'analyse syntaxique.
 import Data.Char        -- Conversion de Chars de/vers Int et autres
 -- import Numeric       -- Pour la fonction showInt
 import System.IO        -- Pour stdout, hPutStr
+import Text.XHtml (address)
 -- import Data.Maybe    -- Pour isJust and fromJust
 
 ---------------------------------------------------------------------------
@@ -246,9 +247,11 @@ hlookup _ p | p < 0 = error "hlookup sur une adresse négative"
 hlookup (Hnode _ e o) p = hlookup (if p `mod` 2 == 0 then e else o) (p `div` 2)
 
 hinsert :: Heap -> Int -> Value -> Heap
-hinsert _ p _ 
-    | p < 0 = error "hinsert sur une adresse négative"
+hinsert _ p _
+    | p < 0 = error "hupdate sur une adresse négative"
 hinsert Hempty 0 v = Hnode (Just v) Hempty Hempty
+hinsert (Hnode _ Hempty Hempty) 0 v = Hnode (Just v) Hempty Hempty
+hinsert (Hnode _ e o) 0 v = Hnode (Just v) e o
 hinsert Hempty p v = hinsert (Hnode Nothing Hempty Hempty) p v
 hinsert (Hnode mv e o) p v
     | even p = Hnode mv (hinsert e (p `div` 2) v) o
@@ -326,14 +329,31 @@ state0 = (Hempty, 0)
 
 eval :: LState -> Env -> Lexp -> (LState, Value)
 eval s _env (Llit n) = (s, Vnum n)
--- ¡¡ COMPLETER !!
-eval s env (Lid var) = (s, mlookup env var)
-eval s env (Labs var e) = (s, Vfun (\(s', arg) -> eval s' (madd env var arg) e))
-eval s env (Lfuncall e es) =
-  let (s', Vfun f) = eval s env e
-      (s'', args) = foldr (\st ex -> eval st env ex) s' es
-  in f (s'', args) -- a refaire
--- il y a d'autres cas à traiter
+--
+eval s env (Lid var) = (s, mlookup env var) -- c bon
+--
+
+
+{-
+data Value = Vnum Int
+           | Vbool Bool
+           | Vref Int
+           | Vfun ((LState, Value) -> (LState, Value))
+
+data Lexp = Llit Int             -- Litéral entier.
+          | Lid Var              -- Référence à une variable.
+          | Labs Var Lexp        -- Fonction anonyme prenant un argument.
+          | Lfuncall Lexp [Lexp] -- Appel de fonction, avec arguments "curried".
+          | Lmkref Lexp          -- Construire une "ref-cell".
+          | Lderef Lexp          -- Chercher la valeur d'une "ref-cell".
+          | Lassign Lexp Lexp    -- Changer la valeur d'une "ref-cell".
+          | Lite Lexp Lexp Lexp  -- If/then/else.
+          | Ldec Var Lexp Lexp   -- Déclaration locale non-récursive.
+          -- Déclaration d'une liste de variables qui peuvent être
+          -- mutuellement récursives.
+          | Lrec [(Var, Lexp)] Lexp
+          deriving (Show, Eq)
+-}
                   
 ---------------------------------------------------------------------------
 -- Toplevel                                                              --
