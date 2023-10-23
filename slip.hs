@@ -16,6 +16,7 @@ import Data.Char        -- Conversion de Chars de/vers Int et autres
 -- import Numeric       -- Pour la fonction showInt
 import System.IO        -- Pour stdout, hPutStr
 import Text.XHtml (address)
+import System.Process (CreateProcess(env))
 -- import Data.Maybe    -- Pour isJust and fromJust
 
 ---------------------------------------------------------------------------
@@ -328,10 +329,102 @@ state0 :: LState
 state0 = (Hempty, 0)
 
 eval :: LState -> Env -> Lexp -> (LState, Value)
+-- Un entier signé en décimal. (e ::= n)
 eval s _env (Llit n) = (s, Vnum n)
---
-eval s env (Lid var) = (s, mlookup env var) -- c bon
---
+-- Une variable (e ::= x)
+eval s env (Lid var) = (s, mlookup env var)
+-- Une fonction avec un argument (e ::= (lambda x e))
+eval s env (Labs var e) = (s, Vfun (\(s',v) -> eval s' (madd env var v) e))
+-- Construction d’une ref-cell (e ::= (ref! e))
+eval s env (Lmkref e) = let (s', v) = eval s env e
+                        in (hinsert s' (snd s') v, Vref (snd s'))
+-- Chercher la valeur de la ref-cell e (e ::= (get! e))
+eval s env (Lderef e) = let (s', v) =  eval s env e
+                        in (s', hlookup s' (case v of
+                                              Vref p -> p
+                                              _ -> error ("Pas une ref: " ++ show v)))
+-- Changer la valeur de la ref-cell e1 (e ::= (set! e1 e2))
+eval s env (Lassign e1 e2) = let (s', v1) = eval s env e1
+                                 (s'', v2) = eval s' env e2
+                             in (hinsert s'' (case v1 of
+                                                 Vref p -> p
+                                                 _ -> error ("Pas une ref: " ++ show v1)) v2, v2)
+-- Opérations arithmétiques prédéfinies (e ::= (+) | (-) | (*) | (/))
+eval s env (Lfuncall (Lid "+") [e1, e2]) = let (s', v1) = eval s env e1
+                                               (s'', v2) = eval s' env e2
+                                           in (s'', case (v1, v2) of
+                                                      (Vnum x, Vnum y) -> Vnum (x + y)
+                                                      _ -> error ("Pas des entiers: "
+                                                                 ++ show v1 ++ "," ++ show v2))
+eval s env (Lfuncall (Lid "-") [e1, e2]) = let (s', v1) = eval s env e1
+                                               (s'', v2) = eval s' env e2
+                                           in (s'', case (v1, v2) of
+                                                      (Vnum x, Vnum y) -> Vnum (x - y)
+                                                      _ -> error ("Pas des entiers: "
+                                                                 ++ show v1 ++ "," ++ show v2))
+eval s env (Lfuncall (Lid "*") [e1, e2]) = let (s', v1) = eval s env e1
+                                               (s'', v2) = eval s' env e2
+                                           in (s'', case (v1, v2) of
+                                                      (Vnum x, Vnum y) -> Vnum (x * y)
+                                                      _ -> error ("Pas des entiers: "
+                                                                 ++ show v1 ++ "," ++ show v2))
+eval s env (Lfuncall (Lid "/") [e1, e2]) = let (s', v1) = eval s env e1
+                                               (s'', v2) = eval s' env e2
+                                           in (s'', case (v1, v2) of
+                                                      (Vnum x, Vnum y) -> Vnum (x `div` y)
+                                                      _ -> error ("Pas des entiers: "
+                                                                 ++ show v1 ++ "," ++ show v2))
+-- Opérations booléennes sur les entiers (e ::= (<) | (>) | (=) | (<=) | (>=))
+eval s env (Lfuncall (Lid "<") [e1, e2]) = let (s', v1) = eval s env e1
+                                               (s'', v2) = eval s' env e2
+                                           in (s'', case (v1, v2) of
+                                                      (Vnum x, Vnum y) -> Vbool (x < y)
+                                                      _ -> error ("Pas des entiers: "
+                                                                 ++ show v1 ++ "," ++ show v2))
+eval s env (Lfuncall (Lid ">") [e1, e2]) = let (s', v1) = eval s env e1
+                                               (s'', v2) = eval s' env e2
+                                           in (s'', case (v1, v2) of
+                                                      (Vnum x, Vnum y) -> Vbool (x > y)
+                                                      _ -> error ("Pas des entiers: "
+                                                                 ++ show v1 ++ "," ++ show v2))
+eval s env (Lfuncall (Lid "=") [e1, e2]) = let (s', v1) = eval s env e1
+                                               (s'', v2) = eval s' env e2
+                                           in (s'', case (v1, v2) of
+                                                      (Vnum x, Vnum y) -> Vbool (x == y)
+                                                      _ -> error ("Pas des entiers: "
+                                                                 ++ show v1 ++ "," ++ show v2))
+eval s env (Lfuncall (Lid "<=") [e1, e2]) = let (s', v1) = eval s env e1
+                                                (s'', v2) = eval s' env e2
+                                            in (s'', case (v1, v2) of
+                                                       (Vnum x, Vnum y) -> Vbool (x <= y)
+                                                       _ -> error ("Pas des entiers: "
+                                                                  ++ show v1 ++ "," ++ show v2))
+eval s env (Lfuncall (Lid ">=") [e1, e2]) = let (s', v1) = eval s env e1
+                                                (s'', v2) = eval s' env e2
+                                            in (s'', case (v1, v2) of
+                                                       (Vnum x, Vnum y) -> Vbool (x >= y)
+                                                       _ -> error ("Pas des entiers: "
+                                                                  ++ show v1 ++ "," ++ show v2))
+-- Si e1 alors e2 sinon e3 (e ::= (if e1 e2 e3))
+eval s env (Lite e1 e2 e3) =  let (s', v1) = eval s env e1
+                                  (s'', v2) = eval s' env e2
+                                  (s''', v3) = eval s'' env e3
+                              in (s''', case v1 of
+                                          Vbool True -> v2
+                                          Vbool False -> v3
+                                          _ -> error ("Pas un booléen: " ++ show v1))
+-- Déclaration locale simple (e ::= (let x e1 e2))
+eval s env (Ldec var e1 e2) = let (s', v1) = eval s env e1
+                              in eval s' (madd env var v1) e2
+-- Déclarations locales récursives (e ::= (letrec ((x1 e1) (x2 e2) ... (xn en)) e)
+eval s env (Lrec [] e) = eval s env e
+-- Un appel de fonction (curried) (e ::= (e0 e1 e2 ... en))
+eval s env (Lfuncall e0 es) = let (s', v0) = eval s env e0
+                                  (s'', vs) = eval s' env es
+                              in case v0 of
+                                   Vfun f -> f (s'', vs)
+                                   _ -> error ("Pas une fonction: " ++ show v0)
+
 
 
 {-
