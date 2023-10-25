@@ -337,18 +337,21 @@ eval s env (Lid var) = (s, mlookup env var)
 eval s env (Labs var e) = (s, Vfun (\(s',v) -> eval s' (madd env var v) e))
 -- Construction d’une ref-cell (e ::= (ref! e))
 eval s env (Lmkref e) = let (s', v) = eval s env e
-                        in (hinsert s' (snd s') v, Vref (snd s'))
+                        in (case hinsert s' (snd s') v of
+                                s'' -> (s'', Vref (snd s'))) -- a faire
 -- Chercher la valeur de la ref-cell e (e ::= (get! e))
-eval s env (Lderef e) = let (s', v) =  eval s env e
-                        in (s', hlookup s' (case v of
-                                              Vref p -> p
-                                              _ -> error ("Pas une ref: " ++ show v)))
+eval s env (Lderef e) = let (s', v) = eval s env e
+                        in (s', case v of
+                                  Vref p -> case hlookup (fst s') p of
+                                              Just v' -> v'
+                                              Nothing -> error ("Pas de valeur pour la ref: " ++ show p)
+                                  _ -> error ("Pas une ref: " ++ show v))
 -- Changer la valeur de la ref-cell e1 (e ::= (set! e1 e2))
 eval s env (Lassign e1 e2) = let (s', v1) = eval s env e1
                                  (s'', v2) = eval s' env e2
                              in (hinsert s'' (case v1 of
                                                  Vref p -> p
-                                                 _ -> error ("Pas une ref: " ++ show v1)) v2, v2)
+                                                 _ -> error ("Pas une ref: " ++ show v1)) v2, v2)   -- a faire
 -- Opérations arithmétiques prédéfinies (e ::= (+) | (-) | (*) | (/))
 eval s env (Lfuncall (Lid "+") [e1, e2]) = let (s', v1) = eval s env e1
                                                (s'', v2) = eval s' env e2
