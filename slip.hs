@@ -421,12 +421,15 @@ eval s env (Ldec var e1 e2) = let (s', v1) = eval s env e1
                               in eval s' (madd env var v1) e2
 -- Déclarations locales récursives (e ::= (letrec ((x1 e1) (x2 e2) ... (xn en)) e)
 eval s env (Lrec [] e) = eval s env e
+eval s env (Lrec ((var, e1) : es) e) = let (s', v1) = eval s env e1
+                                       in eval s' (madd env var v1) (Lrec es e)
+
 -- Un appel de fonction (curried) (e ::= (e0 e1 e2 ... en))
-eval s env (Lfuncall e0 es) = let (s', v0) = eval s env e0
-                                  (s'', vs) = eval s' env es
-                              in case v0 of
-                                   Vfun f -> f (s'', vs)
-                                   _ -> error ("Pas une fonction: " ++ show v0)
+eval s env (Lfuncall e0 [es]) = let (s', v0) = eval s env e0
+                                    (s'', vs) = eval s' env es
+                                in (s'', case v0 of
+                                         Vfun f -> snd (f (s'', vs))
+                                         _ -> error ("Pas une fonction: " ++ show v0)) -- Pas sur
 
 
 
