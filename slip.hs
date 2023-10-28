@@ -199,6 +199,7 @@ s2l (Snum n) = Llit n
 -- Une variable (e ::= x)
 s2l (Ssym s) = Lid s    
 -- Une fonction avec un argument (e ::= (lambda x e))
+s2l (Snode (Ssym "if") [e1, e2, e3]) = Lite (s2l e1) (s2l e2) (s2l e3)
 s2l (Snode (Ssym "λ") [Ssym x, e]) = Labs x (s2l e) -- corrigé
 -- Construction d’une ref-cell (e ::= (ref! e))
 s2l (Snode (Ssym "ref!") [e]) = Lmkref (s2l e)
@@ -208,6 +209,7 @@ s2l (Snode (Ssym "get!") [e]) = Lderef (s2l e)
 s2l (Snode (Ssym "set!") [e1, e2]) = Lassign (s2l e1) (s2l e2)
 s2l (Snode se []) = s2l se -- je comprends pas pq mais ca marche mnt
 s2l (Snode (Ssym "let") [Ssym x, e1, e2]) = Ldec x (s2l e1) (s2l e2)
+s2l (Snode (Ssym "letrec") [Snode (Ssym x) [], e1, e2]) = Lrec [(x, s2l e1)] (s2l e2)
 -- Opérations arithmétiques prédéfinies (e ::= (+) | (-) | (*) | (/))
 s2l (Snode (Ssym "+") [e1, e2]) = Lfuncall (Lid "+") [s2l e1, s2l e2]
 s2l (Snode (Ssym "-") [e1, e2]) = Lfuncall (Lid "-") [s2l e1, s2l e2]
@@ -221,10 +223,8 @@ s2l (Snode (Ssym "<=") [e1, e2]) = Lfuncall (Lid "<=") [s2l e1, s2l e2]
 s2l (Snode (Ssym ">=") [e1, e2]) = Lfuncall (Lid ">=") [s2l e1, s2l e2]
 s2l (Snode e0 es) = Lfuncall (s2l e0) (map s2l es)
 -- Si e1 alors e2 sinon e3 (e ::= (if e1 e2 e3))
-s2l (Snode (Ssym "if") [e1, e2, e3]) = Lite (s2l e1) (s2l e2) (s2l e3)
 -- Déclaration locale simple (e ::= (let x e1 e2))
 -- Déclarations locales récursives (e ::= (letrec ((x1 e1) (x2 e2) ... (xn en)) e)
-s2l (Snode (Ssym "letrec") [Snode (Ssym x) [], e1, e2]) = Lrec [(x, s2l e1)] (s2l e2)
 -- Un appel de fonction (curried) (e ::= (e0 e1 e2 ... en))
 s2l se = error ("Expression Slip inconnue: " ++ showSexp se)
 
@@ -380,8 +380,8 @@ eval s env (Ldec var e1 e2) = let (s', v1) = eval s env e1
                               in eval s' (madd env var v1) e2
 -- Déclarations locales récursives (e ::= (letrec ((x1 e1) (x2 e2) ... (xn en)) e)
 eval s env (Lrec [] e) = eval s env e
-eval s env (Lrec ((var, e1) : es) e) = let (s', v1) = eval s env e1
-                                       in eval s' (madd env var v1) (Lrec es e) -- c bon
+eval s env (Lrec ((var, e1) : es) e) = 
+    eval s env (Ldec var e1 (Lrec es e)) -- c bon
 
 
 
