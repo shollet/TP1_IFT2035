@@ -199,13 +199,15 @@ s2l (Snum n) = Llit n
 -- Une variable (e ::= x)
 s2l (Ssym s) = Lid s    
 -- Une fonction avec un argument (e ::= (lambda x e))
-s2l (Snode (Ssym "λ") [Snode (Ssym x) [], e]) = Labs x (s2l e)  
+s2l (Snode (Ssym "λ") [Ssym x, e]) = Labs x (s2l e) -- corrigé
 -- Construction d’une ref-cell (e ::= (ref! e))
 s2l (Snode (Ssym "ref!") [e]) = Lmkref (s2l e)
 -- Chercher la valeur de la ref-cell e (e ::= (get! e))
 s2l (Snode (Ssym "get!") [e]) = Lderef (s2l e)
 -- Changer la valeur de la ref-cell e1 (e ::= (set! e1 e2))
 s2l (Snode (Ssym "set!") [e1, e2]) = Lassign (s2l e1) (s2l e2)
+s2l (Snode se []) = s2l se -- je comprends pas pq mais ca marche mnt
+s2l (Snode (Ssym "let") [Ssym x, e1, e2]) = Ldec x (s2l e1) (s2l e2)
 -- Opérations arithmétiques prédéfinies (e ::= (+) | (-) | (*) | (/))
 s2l (Snode (Ssym "+") [e1, e2]) = Lfuncall (Lid "+") [s2l e1, s2l e2]
 s2l (Snode (Ssym "-") [e1, e2]) = Lfuncall (Lid "-") [s2l e1, s2l e2]
@@ -217,14 +219,13 @@ s2l (Snode (Ssym ">") [e1, e2]) = Lfuncall (Lid ">") [s2l e1, s2l e2]
 s2l (Snode (Ssym "=") [e1, e2]) = Lfuncall (Lid "=") [s2l e1, s2l e2]
 s2l (Snode (Ssym "<=") [e1, e2]) = Lfuncall (Lid "<=") [s2l e1, s2l e2]
 s2l (Snode (Ssym ">=") [e1, e2]) = Lfuncall (Lid ">=") [s2l e1, s2l e2]
+s2l (Snode e0 es) = Lfuncall (s2l e0) (map s2l es)
 -- Si e1 alors e2 sinon e3 (e ::= (if e1 e2 e3))
 s2l (Snode (Ssym "if") [e1, e2, e3]) = Lite (s2l e1) (s2l e2) (s2l e3)
 -- Déclaration locale simple (e ::= (let x e1 e2))
-s2l (Snode (Ssym "let") [Snode (Ssym x) [], e1, e2]) = Ldec x (s2l e1) (s2l e2)
 -- Déclarations locales récursives (e ::= (letrec ((x1 e1) (x2 e2) ... (xn en)) e)
 s2l (Snode (Ssym "letrec") [Snode (Ssym x) [], e1, e2]) = Lrec [(x, s2l e1)] (s2l e2)
 -- Un appel de fonction (curried) (e ::= (e0 e1 e2 ... en))
-s2l (Snode e0 es) = Lfuncall (s2l e0) (map s2l es)
 s2l se = error ("Expression Slip inconnue: " ++ showSexp se)
 
 ---------------------------------------------------------------------------
@@ -328,15 +329,15 @@ state0 = (Hempty, 0)
 
 eval :: LState -> Env -> Lexp -> (LState, Value)
 -- Un entier signé en décimal. (e ::= n)
-eval s _env (Llit n) = (s, Vnum n)
+eval s _env (Llit n) = (s, Vnum n) 
 -- Une variable (e ::= x)
-eval s env (Lid var) = (s, mlookup env var)
+eval s env (Lid var) = (s, mlookup env var) -- c bon
 -- Une fonction avec un argument (e ::= (lambda x e))
-eval s env (Labs var e) = (s, Vfun (\(s',v) -> eval s' (madd env var v) e))
+eval s env (Labs var e) = (s, Vfun (\(s',v) -> eval s' (madd env var v) e)) -- c bon
 -- Construction d’une ref-cell (e ::= (ref! e))
 eval (h, p) env (Lmkref e) = 
     let (_, v) = eval (h, p) env e
-    in ((hinsert h p v, p + 1), Vref p)
+    in ((hinsert h p v, p + 1), Vref p) -- c bon
 -- Chercher la valeur de la ref-cell e (e ::= (get! e))
 eval s env (Lderef e) = let (s', v) = eval s env e
                         in (s', case v of
@@ -373,7 +374,7 @@ eval s env (Lite e1 e2 e3) =  let (s', v1) = eval s env e1
                               in (s''', case v1 of
                                           Vbool True -> v2
                                           Vbool False -> v3
-                                          _ -> error ("Pas un booléen: " ++ show v1))
+                                          _ -> error ("Pas un booléen: " ++ show v1)) -- c bon
 -- Déclaration locale simple (e ::= (let x e1 e2))
 eval s env (Ldec var e1 e2) = let (s', v1) = eval s env e1
                               in eval s' (madd env var v1) e2
@@ -432,3 +433,19 @@ lexpOf = s2l . sexpOf
 
 valOf :: String -> Value
 valOf = evalSexp . sexpOf
+
+example :: Lexp
+example = Labs "x" (Lfuncall (Lid "+") [Lid "x", Llit 1])
+
+lambdaEval :: (LState, Value)
+lambdaEval = eval state0 env0 example
+
+
+testLambda :: (LState, Value)
+testLambda = 
+    case snd lambdaEval of
+        Vfun f -> f (state0, Vnum 5)
+        _     -> error "Expected a function value"
+
+main :: IO ()
+main = print (snd testLambda)
