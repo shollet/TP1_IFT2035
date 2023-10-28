@@ -380,8 +380,7 @@ eval s env (Ldec var e1 e2) = let (s', v1) = eval s env e1
                               in eval s' (madd env var v1) e2
 -- Déclarations locales récursives (e ::= (letrec ((x1 e1) (x2 e2) ... (xn en)) e)
 eval s env (Lrec [] e) = eval s env e
-eval s env (Lrec ((var, e1) : es) e) = 
-    eval s env (Ldec var e1 (Lrec es e)) -- c bon
+eval s env (Lrec ((var, e1) : es) e) = eval s env (Ldec var e1 (Lrec es e)) -- c bon
 
 
 
@@ -433,19 +432,3 @@ lexpOf = s2l . sexpOf
 
 valOf :: String -> Value
 valOf = evalSexp . sexpOf
-
-example :: Lexp
-example = Labs "x" (Lfuncall (Lid "+") [Lid "x", Llit 1])
-
-lambdaEval :: (LState, Value)
-lambdaEval = eval state0 env0 example
-
-
-testLambda :: (LState, Value)
-testLambda = 
-    case snd lambdaEval of
-        Vfun f -> f (state0, Vnum 5)
-        _     -> error "Expected a function value"
-
-main :: IO ()
-main = print (snd testLambda)
