@@ -197,19 +197,26 @@ s2l :: Sexp -> Lexp
 -- Un entier signé en décimal. (e ::= n)
 s2l (Snum n) = Llit n   
 -- Une variable (e ::= x)
-s2l (Ssym s) = Lid s    
--- Une fonction avec un argument (e ::= (lambda x e))
+s2l (Ssym s) = Lid s
+s2l (Snode se []) = s2l se
+-- Si e1 alors e2 sinon e3 (e ::= (if e1 e2 e3))
 s2l (Snode (Ssym "if") [e1, e2, e3]) = Lite (s2l e1) (s2l e2) (s2l e3)
-s2l (Snode (Ssym "λ") [Ssym x, e]) = Labs x (s2l e) -- corrigé
+-- Une fonction avec un argument (e ::= (λ x e))
+s2l (Snode (Ssym "lambda") [Ssym x, e]) = Labs x (s2l e) -- corrigé
 -- Construction d’une ref-cell (e ::= (ref! e))
 s2l (Snode (Ssym "ref!") [e]) = Lmkref (s2l e)
 -- Chercher la valeur de la ref-cell e (e ::= (get! e))
 s2l (Snode (Ssym "get!") [e]) = Lderef (s2l e)
 -- Changer la valeur de la ref-cell e1 (e ::= (set! e1 e2))
 s2l (Snode (Ssym "set!") [e1, e2]) = Lassign (s2l e1) (s2l e2)
-s2l (Snode se []) = s2l se -- je comprends pas pq mais ca marche mnt
+-- Déclaration locale simple (e ::= (let x e1 e2))
 s2l (Snode (Ssym "let") [Ssym x, e1, e2]) = Ldec x (s2l e1) (s2l e2)
-s2l (Snode (Ssym "letrec") [Snode (Ssym x) [], e1, e2]) = Lrec [(x, s2l e1)] (s2l e2)
+-- Déclarations locales récursives (e ::= (letrec ((x1 e1) (x2 e2) ... (xn en)) e)
+s2l (Snode (Ssym "letrec") [Snode _ bindings, body]) =
+    let extractBinding (Snode (Ssym var) [expr]) = (var, s2l expr)
+        extractBinding _ = error "Malformed letrec binding"
+        bindingsList = map extractBinding bindings
+    in Lrec bindingsList (s2l body)
 -- Opérations arithmétiques prédéfinies (e ::= (+) | (-) | (*) | (/))
 s2l (Snode (Ssym "+") [e1, e2]) = Lfuncall (Lid "+") [s2l e1, s2l e2]
 s2l (Snode (Ssym "-") [e1, e2]) = Lfuncall (Lid "-") [s2l e1, s2l e2]
@@ -221,11 +228,8 @@ s2l (Snode (Ssym ">") [e1, e2]) = Lfuncall (Lid ">") [s2l e1, s2l e2]
 s2l (Snode (Ssym "=") [e1, e2]) = Lfuncall (Lid "=") [s2l e1, s2l e2]
 s2l (Snode (Ssym "<=") [e1, e2]) = Lfuncall (Lid "<=") [s2l e1, s2l e2]
 s2l (Snode (Ssym ">=") [e1, e2]) = Lfuncall (Lid ">=") [s2l e1, s2l e2]
-s2l (Snode e0 es) = Lfuncall (s2l e0) (map s2l es)
--- Si e1 alors e2 sinon e3 (e ::= (if e1 e2 e3))
--- Déclaration locale simple (e ::= (let x e1 e2))
--- Déclarations locales récursives (e ::= (letrec ((x1 e1) (x2 e2) ... (xn en)) e)
 -- Un appel de fonction (curried) (e ::= (e0 e1 e2 ... en))
+s2l (Snode e0 es) = Lfuncall (s2l e0) (map s2l es)
 s2l se = error ("Expression Slip inconnue: " ++ showSexp se)
 
 ---------------------------------------------------------------------------
@@ -328,24 +332,24 @@ state0 :: LState
 state0 = (Hempty, 0)
 
 eval :: LState -> Env -> Lexp -> (LState, Value)
--- Un entier signé en décimal. (e ::= n)
+
 eval s _env (Llit n) = (s, Vnum n) 
--- Une variable (e ::= x)
-eval s env (Lid var) = (s, mlookup env var) -- c bon
--- Une fonction avec un argument (e ::= (lambda x e))
-eval s env (Labs var e) = (s, Vfun (\(s',v) -> eval s' (madd env var v) e)) -- c bon
--- Construction d’une ref-cell (e ::= (ref! e))
+
+eval s env (Lid var) = (s, mlookup env var)
+
+eval s env (Labs var e) = (s, Vfun (\(s',v) -> eval s' (madd env var v) e))
+
 eval (h, p) env (Lmkref e) = 
     let (_, v) = eval (h, p) env e
-    in ((hinsert h p v, p + 1), Vref p) -- c bon
--- Chercher la valeur de la ref-cell e (e ::= (get! e))
+    in ((hinsert h p v, p + 1), Vref p)
+
 eval s env (Lderef e) = let (s', v) = eval s env e
                         in (s', case v of
                                   Vref p -> case hlookup (fst s') p of
                                               Just v' -> v'
                                               Nothing -> error ("Pas de valeur pour la ref: " ++ show p)
-                                  _ -> error ("Pas une ref: " ++ show v)) -- c bon
--- Changer la valeur de la ref-cell e1 (e ::= (set! e1 e2))
+                                  _ -> error ("Pas une ref: " ++ show v))
+
 eval s env (Lassign e1 e2) = 
     let (s', v1) = eval s env e1
     in case v1 of
@@ -354,7 +358,7 @@ eval s env (Lassign e1 e2) =
                 h' = hinsert (fst s'') p v2
             in ((h', snd s''), v2)
         _ -> error "ce n'est pas une réference"
--- Opérations arithmétiques prédéfinies (e ::= (+) | (-) | (*) | (/))
+
 eval s env (Lfuncall e0 es) = 
     let (s', v0) = eval s env e0
     in case v0 of
@@ -367,22 +371,19 @@ eval s env (Lfuncall e0 es) =
                      ) (s'', Vfun f) vs
         _ -> error "ce n'est pas un appel de fonction"
 
--- Si e1 alors e2 sinon e3 (e ::= (if e1 e2 e3))
 eval s env (Lite e1 e2 e3) =  let (s', v1) = eval s env e1
                                   (s'', v2) = eval s' env e2
                                   (s''', v3) = eval s'' env e3
                               in (s''', case v1 of
                                           Vbool True -> v2
                                           Vbool False -> v3
-                                          _ -> error ("Pas un booléen: " ++ show v1)) -- c bon
--- Déclaration locale simple (e ::= (let x e1 e2))
+                                          _ -> error ("Pas un booléen: " ++ show v1))
+
 eval s env (Ldec var e1 e2) = let (s', v1) = eval s env e1
                               in eval s' (madd env var v1) e2
--- Déclarations locales récursives (e ::= (letrec ((x1 e1) (x2 e2) ... (xn en)) e)
+
 eval s env (Lrec [] e) = eval s env e
-eval s env (Lrec ((var, e1) : es) e) = eval s env (Ldec var e1 (Lrec es e)) -- c bon
-
-
+eval s env (Lrec ((var, e1) : es) e) = eval s env (Ldec var e1 (Lrec es e))
 
 
 {-

@@ -1,0 +1,1 @@
+(letrec ((c1 (ref! 1)) (c2 (ref! 2)) (c3 (ref! 3))) (+ (get! c1) (+ (get! c2) (get! c3))))
