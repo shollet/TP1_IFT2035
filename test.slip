@@ -1,1 +1,2 @@
-((λ x x) 2) 
+(letrec ((fac (λ x (if (< x 2) x (* x (fac (- x 1)))))))
+  (fac 5))
