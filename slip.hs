@@ -202,7 +202,7 @@ s2l (Snode se []) = s2l se
 -- Si e1 alors e2 sinon e3 (e ::= (if e1 e2 e3))
 s2l (Snode (Ssym "if") [e1, e2, e3]) = Lite (s2l e1) (s2l e2) (s2l e3)
 -- Une fonction avec un argument (e ::= (λ x e))
-s2l (Snode (Ssym "lambda") [Ssym x, e]) = Labs x (s2l e) -- corrigé
+s2l (Snode (Ssym "λ") [Ssym x, e]) = Labs x (s2l e) -- corrigé
 -- Construction d’une ref-cell (e ::= (ref! e))
 s2l (Snode (Ssym "ref!") [e]) = Lmkref (s2l e)
 -- Chercher la valeur de la ref-cell e (e ::= (get! e))
@@ -212,11 +212,15 @@ s2l (Snode (Ssym "set!") [e1, e2]) = Lassign (s2l e1) (s2l e2)
 -- Déclaration locale simple (e ::= (let x e1 e2))
 s2l (Snode (Ssym "let") [Ssym x, e1, e2]) = Ldec x (s2l e1) (s2l e2)
 -- Déclarations locales récursives (e ::= (letrec ((x1 e1) (x2 e2) ... (xn en)) e)
-s2l (Snode (Ssym "letrec") [Snode _ bindings, body]) =
-    let extractBinding (Snode (Ssym var) [expr]) = (var, s2l expr)
-        extractBinding _ = error "Malformed letrec binding"
-        bindingsList = map extractBinding bindings
-    in Lrec bindingsList (s2l body)
+s2l (Snode (Ssym "letrec") [snodes, sexp']) =
+  let varsExpsList = makeVarsLexpsList snodes
+   in Lrec varsExpsList (s2l sexp')
+  where
+    makeVarsLexpsList :: Sexp -> [(Var, Lexp)]
+    makeVarsLexpsList (Snode (Snode (Ssym var1) [exp1]) []) = [(var1, s2l exp1)]
+    makeVarsLexpsList (Snode (Snode (Ssym var1) [exp1]) (snode : snodes)) = case snode of
+      Snode (Ssym var2) [exp2] -> (var1, s2l exp1) : makeVarsLexpsList (Snode (Snode (Ssym var2) [exp2]) snodes)
+    makeVarsLexpsList _ = error "Invalid letrec expression"
 -- Opérations arithmétiques prédéfinies (e ::= (+) | (-) | (*) | (/))
 s2l (Snode (Ssym "+") [e1, e2]) = Lfuncall (Lid "+") [s2l e1, s2l e2]
 s2l (Snode (Ssym "-") [e1, e2]) = Lfuncall (Lid "-") [s2l e1, s2l e2]
@@ -335,7 +339,7 @@ eval :: LState -> Env -> Lexp -> (LState, Value)
 
 eval s _env (Llit n) = (s, Vnum n) 
 
-eval s env (Lid var) = (s, mlookup env var)
+eval s _env (Lid var) = (s, mlookup _env var)
 
 eval s env (Labs var e) = (s, Vfun (\(s',v) -> eval s' (madd env var v) e))
 
@@ -382,31 +386,13 @@ eval s env (Lite e1 e2 e3) =  let (s', v1) = eval s env e1
 eval s env (Ldec var e1 e2) = let (s', v1) = eval s env e1
                               in eval s' (madd env var v1) e2
 
-eval s env (Lrec [] e) = eval s env e
-eval s env (Lrec ((var, e1) : es) e) = eval s env (Ldec var e1 (Lrec es e))
+eval s _env (Lrec [] lexp) = eval s _env lexp
+eval s _env (Lrec ((var, lexp) : rest) le) =
+  let (s', val) = eval s _env lexp
+      _env' = madd _env var val
+  in eval s' _env' (Lrec rest le)
 
 
-{-
-data Value = Vnum Int
-           | Vbool Bool
-           | Vref Int
-           | Vfun ((LState, Value) -> (LState, Value))
-
-data Lexp = Llit Int             -- Litéral entier.
-          | Lid Var              -- Référence à une variable.
-          | Labs Var Lexp        -- Fonction anonyme prenant un argument.
-          | Lfuncall Lexp [Lexp] -- Appel de fonction, avec arguments "curried".
-          | Lmkref Lexp          -- Construire une "ref-cell".
-          | Lderef Lexp          -- Chercher la valeur d'une "ref-cell".
-          | Lassign Lexp Lexp    -- Changer la valeur d'une "ref-cell".
-          | Lite Lexp Lexp Lexp  -- If/then/else.
-          | Ldec Var Lexp Lexp   -- Déclaration locale non-récursive.
-          -- Déclaration d'une liste de variables qui peuvent être
-          -- mutuellement récursives.
-          | Lrec [(Var, Lexp)] Lexp
-          deriving (Show, Eq)
--}
-                  
 ---------------------------------------------------------------------------
 -- Toplevel                                                              --
 ---------------------------------------------------------------------------
@@ -418,12 +404,16 @@ evalSexp = snd . eval state0 env0 . s2l
 -- l'autre, et renvoie la liste des valeurs obtenues.
 run :: FilePath -> IO ()
 run filename =
-    do s <- readFile filename
+    do inputHandle <- openFile filename ReadMode 
+       hSetEncoding inputHandle utf8
+       s <- hGetContents inputHandle
+       -- s <- readFile filename
        (hPutStr stdout . show)
            (let sexps s' = case parse pSexps filename s' of
                              Left _ -> [Ssym "#<parse-error>"]
                              Right es -> es
             in map evalSexp (sexps s))
+       hClose inputHandle
 
 sexpOf :: String -> Sexp
 sexpOf = read
