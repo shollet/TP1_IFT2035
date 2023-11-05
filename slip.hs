@@ -198,9 +198,6 @@ s2l :: Sexp -> Lexp
 s2l (Snum n) = Llit n
 -- Une variable (e ::= x)
 s2l (Ssym s) = Lid s
-s2l (Snode se []) = s2l se
--- Si e1 alors e2 sinon e3 (e ::= (if e1 e2 e3))
-s2l (Snode (Ssym "if") [e1, e2, e3]) = Lite (s2l e1) (s2l e2) (s2l e3)
 -- Une fonction avec un argument (e ::= (λ x e))
 s2l (Snode (Ssym "λ") [Ssym x, e]) = Labs x (s2l e)
 -- Construction d’une ref-cell (e ::= (ref! e))
@@ -209,20 +206,23 @@ s2l (Snode (Ssym "ref!") [e]) = Lmkref (s2l e)
 s2l (Snode (Ssym "get!") [e]) = Lderef (s2l e)
 -- Changer la valeur de la ref-cell e1 (e ::= (set! e1 e2))
 s2l (Snode (Ssym "set!") [e1, e2]) = Lassign (s2l e1) (s2l e2)
+-- Si e1 alors e2 sinon e3 (e ::= (if e1 e2 e3))
+s2l (Snode (Ssym "if") [e1, e2, e3]) = Lite (s2l e1) (s2l e2) (s2l e3)
 -- Déclaration locale simple (e ::= (let x e1 e2))
 s2l (Snode (Ssym "let") [Ssym x, e1, e2]) = Ldec x (s2l e1) (s2l e2)
 -- Déclarations locales récursives (e ::= (letrec ((x1 e1) (x2 e2) ... (xn en)) e)
 s2l (Snode (Ssym "letrec") [snodes, sexp']) =
   let varsExpsList = makeVarsLexpsList snodes
-   in Lrec varsExpsList (s2l sexp')
-  where
-    makeVarsLexpsList :: Sexp -> [(Var, Lexp)]
-    makeVarsLexpsList (Snode (Snode (Ssym var1) [exp1]) []) = [(var1, s2l exp1)]
-    makeVarsLexpsList (Snode (Snode (Ssym var1) [exp1]) (snode : snodes')) = 
-        case snode of
-            Snode (Ssym var2) [exp2] -> (var1, s2l exp1) : makeVarsLexpsList (Snode (Snode (Ssym var2) [exp2]) snodes')
-            _ -> error "Invalid letrec expression"
-    makeVarsLexpsList _ = error "Invalid letrec expression"
+  in Lrec varsExpsList (s2l sexp')
+    where
+        makeVarsLexpsList :: Sexp -> [(Var, Lexp)]
+        makeVarsLexpsList (Snode (Snode (Ssym var1) [exp1]) []) = [(var1, s2l exp1)]
+        makeVarsLexpsList (Snode (Snode (Ssym var1) [exp1]) (snode : snodes')) = 
+            case snode of
+                Snode (Ssym var2) [exp2] -> 
+                    (var1, s2l exp1) : makeVarsLexpsList (Snode (Snode (Ssym var2) [exp2]) snodes')
+                _ -> error "Invalid letrec expression"
+        makeVarsLexpsList _ = error "Invalid letrec expression"
 -- Un appel de fonction (curried) (e ::= (e0 e1 e2 ... en))
 s2l (Snode e0 es) = Lfuncall (s2l e0) (map s2l es)
 s2l se = error ("Expression Slip inconnue: " ++ showSexp se)
@@ -319,17 +319,17 @@ env0 = let binop :: (Value -> Value -> Value) -> Value
            (">=", binii Vbool (>=)),
            ("<=", binii Vbool (<=)),
            ("odd", Vfun (\ (s1, v1)
-                             -> (s1, case v1 of
-                                         Vnum x -> Vbool (odd x)
-                                         _ -> error ("Pas un entier: " ++ show v1)))),
+                            -> (s1, case v1 of
+                                    Vnum x -> Vbool (odd x)
+                                    _ -> error ("Pas un entier: " ++ show v1)))),
             ("even", Vfun (\ (s1, v1)
                              -> (s1, case v1 of
-                                         Vnum x -> Vbool (even x)
-                                         _ -> error ("Pas un entier: " ++ show v1)))),
+                                    Vnum x -> Vbool (even x)
+                                    _ -> error ("Pas un entier: " ++ show v1)))),
             ("fac", Vfun (\ (s1, v1)
                              -> (s1, case v1 of
-                                         Vnum x -> Vnum (product [1..x])
-                                         _ -> error ("Pas un entier: " ++ show v1))))]
+                                    Vnum x -> Vnum (product [1..x])
+                                    _ -> error ("Pas un entier: " ++ show v1))))]
     
 
 ---------------------------------------------------------------------------
@@ -340,11 +340,8 @@ state0 :: LState
 state0 = (Hempty, 0)
 
 eval :: LState -> Env -> Lexp -> (LState, Value)
-
 eval s _env (Llit n) = (s, Vnum n) 
-
 eval s env (Lid var) = (s, mlookup env var)
-
 eval s env (Labs var e) = (s, Vfun (\(s',v) -> eval s' (madd env var v) e))
 
 eval (h, p) env (Lmkref e) = 
@@ -373,7 +370,9 @@ eval s env (Lfuncall e0 es) =
     let (s', v0) = eval s env e0
     in case v0 of
         Vfun f -> 
-            let (s'', vs) = foldl (\(st, acc) e -> let (st', v) = eval st env e in (st', acc ++ [v])) (s', []) es
+            let (s'', vs) = foldl (\(st, acc) e -> 
+                    let (st', v) = eval st env e 
+                    in (st', acc ++ [v])) (s', []) es
             in foldl (\st_v v -> 
                         case st_v of 
                             (st, Vfun f') -> f' (st, v)
