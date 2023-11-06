@@ -17,6 +17,8 @@ import Data.Char        -- Conversion de Chars de/vers Int et autres
 import System.IO        -- Pour stdout, hPutStr
 -- import Data.Maybe    -- Pour isJust and fromJust
 
+
+
 ---------------------------------------------------------------------------
 -- La représentation interne des expressions de notre language           --
 ---------------------------------------------------------------------------
@@ -214,15 +216,15 @@ s2l (Snode (Ssym "let") [Ssym x, e1, e2]) = Ldec x (s2l e1) (s2l e2)
 -- Déclarations locales récursives (e ::= (letrec ((x1 e1) (x2 e2) ... (xn en)) e)
 s2l (Snode (Ssym "letrec") [snodes, sexp']) =
   let varsExpsList = makeVarsLexpsList snodes
-   in Lrec varsExpsList (s2l sexp')
-  where
-    makeVarsLexpsList :: Sexp -> [(Var, Lexp)]
-    makeVarsLexpsList (Snode (Snode (Ssym var1) [exp1]) []) = [(var1, s2l exp1)]
-    makeVarsLexpsList (Snode (Snode (Ssym var1) [exp1]) (snode : snodes')) = 
-        case snode of
-            Snode (Ssym var2) [exp2] -> (var1, s2l exp1) : makeVarsLexpsList (Snode (Snode (Ssym var2) [exp2]) snodes')
-            _ -> error "Invalid letrec expression"
-    makeVarsLexpsList _ = error "Invalid letrec expression"
+  in Lrec varsExpsList (s2l sexp')
+    where
+        makeVarsLexpsList :: Sexp -> [(Var, Lexp)]
+        makeVarsLexpsList (Snode (Snode (Ssym var1) [exp1]) []) = [(var1, s2l exp1)]
+        makeVarsLexpsList (Snode (Snode (Ssym var1) [exp1]) (snode : snodes')) =
+            case snode of
+                Snode (Ssym var2) [exp2] -> (var1, s2l exp1) : makeVarsLexpsList (Snode (Snode (Ssym var2) [exp2]) snodes')
+                _ -> error "Invalid letrec expression"
+        makeVarsLexpsList _ = error "Invalid letrec expression"
 -- Un appel de fonction (curried) (e ::= (e0 e1 e2 ... en))
 s2l (Snode e0 es) = Lfuncall (s2l e0) (map s2l es)
 s2l se = error ("Expression Slip inconnue: " ++ showSexp se)
@@ -245,7 +247,7 @@ hlookup (Hnode mv _ _) 0 = mv
 hlookup _ p | p < 0 = error "hlookup sur une adresse négative"
 hlookup (Hnode _ e o) p = hlookup (if p `mod` 2 == 0 then e else o) (p `div` 2)
 
-hinsert :: Heap -> Int -> Value -> Heap
+hinsert :: Heap -> Int ->  Value -> Heap
 hinsert _ p _
     | p < 0 = error "hupdate sur une adresse négative"
 hinsert Hempty 0 v = Hnode (Just v) Hempty Hempty
@@ -255,6 +257,7 @@ hinsert Hempty p v = hinsert (Hnode Nothing Hempty Hempty) p v
 hinsert (Hnode mv e o) p v
     | even p = Hnode mv (hinsert e (p `div` 2) v) o
     | otherwise = Hnode mv e (hinsert o (p `div` 2) v)
+
 
 -- Représentation de l'environnement --------------------------------------
 
@@ -291,7 +294,7 @@ instance Show Value where
 type Env = Map Var Value
 
 -- L'environnement initial qui contient les fonctions prédéfinies.
-            
+
 env0 :: Env
 env0 = let binop :: (Value -> Value -> Value) -> Value
            binop op = Vfun (\ (s1, v1)
@@ -316,8 +319,9 @@ env0 = let binop :: (Value -> Value -> Value) -> Value
            ("<",  binii Vbool (<)),
            (">",  binii Vbool (>)),
            ("=",  binii Vbool (==)),
+           ("<=", binii Vbool (<=)),
            (">=", binii Vbool (>=))]
-    
+
 
 ---------------------------------------------------------------------------
 -- Évaluateur                                                            --
@@ -328,13 +332,13 @@ state0 = (Hempty, 0)
 
 eval :: LState -> Env -> Lexp -> (LState, Value)
 
-eval s _env (Llit n) = (s, Vnum n) 
+eval s _env (Llit n) = (s, Vnum n)
 
 eval s env (Lid var) = (s, mlookup env var)
 
 eval s env (Labs var e) = (s, Vfun (\(s',v) -> eval s' (madd env var v) e))
 
-eval (h, p) env (Lmkref e) = 
+eval (h, p) env (Lmkref e) =
     let (_, v) = eval (h, p) env e
     in ((hinsert h p v, p + 1), Vref p)
 
@@ -345,28 +349,27 @@ eval s env (Lderef e) = let (s', v) = eval s env e
                                               Nothing -> error ("Pas de valeur pour la ref: " ++ show p)
                                   _ -> error ("Pas une ref: " ++ show v))
 
-eval s env (Lassign e1 e2) = 
+eval s env (Lassign e1 e2) =
     let (s', v1) = eval s env e1
     in case v1 of
-        Vref p -> 
+        Vref p ->
             let (s'', v2) = eval s' env e2
                 h' = hinsert (fst s'') p v2
             in ((h', snd s''), v2)
         _ -> error "ce n'est pas une réference"
 
-
-
-eval s env (Lfuncall e0 es) = 
+eval s env (Lfuncall e0 es) =
     let (s', v0) = eval s env e0
     in case v0 of
-        Vfun f -> 
-            let (s'', vs) = foldl (\(st, acc) e -> let (st', v) = eval st env e in (st', acc ++ [v])) (s', []) es
-            in foldl (\st_v v -> 
-                        case st_v of 
-                            (st, Vfun f') -> f' (st, v)
-                            _ -> error "valeur non-connue"
-                     ) (s'', Vfun f) vs
+        Vfun f -> foldl (\(st, accFun) e ->
+                            let (st', v) = eval st env e
+                            in case accFun of
+                                 Vfun f' -> let (newSt, res) = f' (st', v)
+                                            in (newSt, res)
+                                 _ -> error "valeur non-connue"
+                       ) (s', Vfun f) es
         _ -> error "ce n'est pas un appel de fonction"
+
 
 eval s env (Lite e1 e2 e3) =  let (s', v1) = eval s env e1
                                   (s'', v2) = eval s' env e2
@@ -378,17 +381,14 @@ eval s env (Lite e1 e2 e3) =  let (s', v1) = eval s env e1
 
 eval s env (Ldec var e1 e2) = let (s', v1) = eval s env e1
                               in eval s' (madd env var v1) e2
-
 eval s env (Lrec bindings body) =
-    let (newState, newEnv) = foldl augmentEnv (s, env) bindings
-    in eval newState newEnv body
+    let cyclicEnv = foldr (\(var, expr) env' -> madd env' var (lazyEval s cyclicEnv expr)) env bindings
+    in eval s cyclicEnv body
 
-augmentEnv :: (LState, Env) -> (Var, Lexp) -> (LState, Env)
-augmentEnv (s, env) (var, expr) =
-    let (newState, val) = eval s env expr
-    in (newState, madd env var val)
-
-
+lazyEval :: LState -> Env -> Lexp -> Value
+lazyEval s env e = 
+    let (_, val) = eval s env e
+    in val
 
 
 
@@ -403,7 +403,7 @@ evalSexp = snd . eval state0 env0 . s2l
 -- l'autre, et renvoie la liste des valeurs obtenues.
 run :: FilePath -> IO ()
 run filename =
-    do inputHandle <- openFile filename ReadMode 
+    do inputHandle <- openFile filename ReadMode
        hSetEncoding inputHandle utf8
        s <- hGetContents inputHandle
        -- s <- readFile filename
