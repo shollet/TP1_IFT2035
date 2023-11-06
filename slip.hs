@@ -383,23 +383,18 @@ eval s env (Ldec var e1 e2) = let (s', v1) = eval s env e1
                               in eval s' (madd env var v1) e2
 
 eval s env (Lrec bindings body) =
-    -- Étape 1: Créer un environnement initial avec des stubs pour les fonctions récursives.
-    let envWithStubs = foldl (\env' (var, _) -> madd env' var (Vfun (\_ -> error "Recursive call without body"))) env bindings
+    let envWithStubs = foldl (\e (var, _) -> madd e var (Vfun (\_ -> error $ "Uninitialized recursive function: " ++ var))) env bindings
+        makeClosure env' (var, expr) = case expr of
+            Labs _ _ -> let closure = Vfun (\(st, _) -> eval st (madd env' var closure) expr)
+                        in madd env' var closure
+            _ -> env'
+        envWithClosures = foldl makeClosure envWithStubs bindings
 
-        -- Étape 2: Remplacer les stubs par les vraies fermetures qui se référencent elles-mêmes.
-        envWithClosures = foldr (\(var, bindExpr) env' ->
-            let closure = Vfun (\(st', _) -> eval st' (madd env' var closure) bindExpr)
-            in madd env' var closure) envWithStubs bindings
+        evalNonRec (st, e) (var, expr) = case expr of
+            Labs _ _ -> (st, e)
+            _ -> let (st', val) = eval st e expr in (st', madd e var val)
 
-        -- Étape 3: Évaluer les expressions non fonctionnelles dans cet environnement.
-        evalNonFunctionals (env', st') (var, bindExpr) = case bindExpr of
-            Labs _ _ -> (env', st') -- Ignorer les fonctions, déjà traitées.
-            _ -> let (st'', val) = eval st' env' bindExpr in (madd env' var val, st'')
-
-        -- Étape 4: Construire l'environnement final avec les valeurs évaluées pour les non fonctionnelles.
-        (finalEnv, finalState) = foldl evalNonFunctionals (envWithClosures, s) bindings
-
-    -- Étape 5: Évaluer le corps du letrec dans l'environnement final.
+        (finalState, finalEnv) = foldl evalNonRec (s, envWithClosures) bindings
     in eval finalState finalEnv body
 
 ---------------------------------------------------------------------------
