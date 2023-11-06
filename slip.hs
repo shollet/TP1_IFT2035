@@ -16,7 +16,6 @@ import Data.Char        -- Conversion de Chars de/vers Int et autres
 -- import Numeric       -- Pour la fonction showInt
 import System.IO        -- Pour stdout, hPutStr
 -- import Data.Maybe    -- Pour isJust and fromJust
-import Debug.Trace (trace)
 
 
 
@@ -382,15 +381,29 @@ eval s env (Lite e1 e2 e3) =  let (s', v1) = eval s env e1
 
 eval s env (Ldec var e1 e2) = let (s', v1) = eval s env e1
                               in eval s' (madd env var v1) e2
+
 eval s env (Lrec bindings body) =
-    let cyclicEnv = foldr (\(var, expr) env' -> madd env' var (lazyEval s cyclicEnv expr)) env bindings
-    in eval s cyclicEnv body
+    let -- Initialisation précoce des cellules de référence dans le tas avec une valeur par défaut
+        (s', initialEnv) = foldl initializeRefs (s, env) bindings
+        initializeRefs (st, env') (var, expr) =
+            case expr of
+                Lmkref _ -> 
+                    let (st', ref) = eval st env' expr
+                    in case ref of
+                        Vref addr -> 
+                            let heap' = hinsert (fst st') addr (Vnum 0) -- Remplacer par une valeur par défaut si nécessaire
+                            in ((heap', snd st'), madd env' var ref)
+                        _         -> error "Lmkref did not return a Vref."
+                _        -> (st, env')
+        
+        -- Environnement cyclique avec évaluation paresseuse pour les expressions
+        cyclicEnv = foldr (\(var, expr) env' -> madd env' var (lazyEval s' cyclicEnv expr)) initialEnv bindings
+    in eval s' cyclicEnv body
 
 lazyEval :: LState -> Env -> Lexp -> Value
 lazyEval s env e = 
     let (_, val) = eval s env e
     in val
-
 ---------------------------------------------------------------------------
 -- Toplevel                                                              --
 ---------------------------------------------------------------------------
