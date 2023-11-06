@@ -284,6 +284,7 @@ data Value = Vnum Int
            | Vbool Bool
            | Vref Int
            | Vfun ((LState, Value) -> (LState, Value))
+           | Vthunk (LState -> (LState, Value))
 
 instance Show Value where
     showsPrec p (Vnum n) = showsPrec p n
@@ -334,7 +335,11 @@ eval :: LState -> Env -> Lexp -> (LState, Value)
 
 eval s _env (Llit n) = (s, Vnum n)
 
-eval s env (Lid var) = (s, mlookup env var)
+eval s env (Lid var) = 
+    case mlookup env var of
+        Vthunk thunk -> thunk s
+        value -> (s, value)
+
 
 eval s env (Labs var e) = (s, Vfun (\(s',v) -> eval s' (madd env var v) e))
 
@@ -382,13 +387,19 @@ eval s env (Lite e1 e2 e3) =  let (s', v1) = eval s env e1
 eval s env (Ldec var e1 e2) = let (s', v1) = eval s env e1
                               in eval s' (madd env var v1) e2
 eval s env (Lrec bindings body) =
-    let cyclicEnv = foldr (\(var, expr) env' -> madd env' var (lazyEval s cyclicEnv expr)) env bindings
-    in eval s cyclicEnv body
+    -- Bind each variable to a thunk that represents its computation
+    let extendedEnv = foldr (\(var, expr) env' -> madd env' var (Vthunk (\s -> eval s extendedEnv expr))) env bindings
+    -- Evaluate the body in this environment
+    in eval s extendedEnv body
 
-lazyEval :: LState -> Env -> Lexp -> Value
-lazyEval s env e = 
-    let (_, val) = eval s env e
+
+lazyEval :: LState -> Env -> Var -> Value
+lazyEval s env var = 
+    let (_, val) = eval s env (Lid var)
     in val
+
+
+
 
 
 
