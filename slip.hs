@@ -200,9 +200,6 @@ s2l :: Sexp -> Lexp
 s2l (Snum n) = Llit n
 -- Une variable (e ::= x)
 s2l (Ssym s) = Lid s
-s2l (Snode se []) = s2l se
--- Si e1 alors e2 sinon e3 (e ::= (if e1 e2 e3))
-s2l (Snode (Ssym "if") [e1, e2, e3]) = Lite (s2l e1) (s2l e2) (s2l e3)
 -- Une fonction avec un argument (e ::= (λ x e))
 s2l (Snode (Ssym "λ") [Ssym x, e]) = Labs x (s2l e)
 -- Construction d’une ref-cell (e ::= (ref! e))
@@ -211,7 +208,9 @@ s2l (Snode (Ssym "ref!") [e]) = Lmkref (s2l e)
 s2l (Snode (Ssym "get!") [e]) = Lderef (s2l e)
 -- Changer la valeur de la ref-cell e1 (e ::= (set! e1 e2))
 s2l (Snode (Ssym "set!") [e1, e2]) = Lassign (s2l e1) (s2l e2)
--- Déclaration locale simple (e ::= (let x e1 e2))
+-- Si e1 alors e2 sinon e3 (e ::= (if e1 e2 e3))
+s2l (Snode (Ssym "if") [e1, e2, e3]) = Lite (s2l e1) (s2l e2) (s2l e3)
+    -- Déclaration locale simple (e ::= (let x e1 e2))
 s2l (Snode (Ssym "let") [Ssym x, e1, e2]) = Ldec x (s2l e1) (s2l e2)
 -- Déclarations locales récursives (e ::= (letrec ((x1 e1) (x2 e2) ... (xn en)) e)
 s2l (Snode (Ssym "letrec") [snodes, sexp']) =
@@ -386,9 +385,10 @@ eval s env (Lite e1 e2 e3) =  let (s', v1) = eval s env e1
 
 eval s env (Ldec var e1 e2) = let (s', v1) = eval s env e1
                               in eval s' (madd env var v1) e2
+
 eval s env (Lrec bindings body) =
     -- Bind each variable to a thunk that represents its computation
-    let extendedEnv = foldr (\(var, expr) env' -> madd env' var (Vthunk (\s -> eval s extendedEnv expr))) env bindings
+    let extendedEnv = foldr (\(var, expr) env' -> madd env' var (Vthunk (\_ -> eval s extendedEnv expr))) env bindings
     -- Evaluate the body in this environment
     in eval s extendedEnv body
 
@@ -397,11 +397,6 @@ lazyEval :: LState -> Env -> Var -> Value
 lazyEval s env var = 
     let (_, val) = eval s env (Lid var)
     in val
-
-
-
-
-
 
 ---------------------------------------------------------------------------
 -- Toplevel                                                              --
