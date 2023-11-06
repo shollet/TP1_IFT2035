@@ -16,6 +16,7 @@ import Data.Char        -- Conversion de Chars de/vers Int et autres
 -- import Numeric       -- Pour la fonction showInt
 import System.IO        -- Pour stdout, hPutStr
 -- import Data.Maybe    -- Pour isJust and fromJust
+import Debug.Trace (trace)
 
 ---------------------------------------------------------------------------
 -- La représentation interne des expressions de notre language           --
@@ -214,15 +215,15 @@ s2l (Snode (Ssym "let") [Ssym x, e1, e2]) = Ldec x (s2l e1) (s2l e2)
 -- Déclarations locales récursives (e ::= (letrec ((x1 e1) (x2 e2) ... (xn en)) e)
 s2l (Snode (Ssym "letrec") [snodes, sexp']) =
   let varsExpsList = makeVarsLexpsList snodes
-   in Lrec varsExpsList (s2l sexp')
-  where
-    makeVarsLexpsList :: Sexp -> [(Var, Lexp)]
-    makeVarsLexpsList (Snode (Snode (Ssym var1) [exp1]) []) = [(var1, s2l exp1)]
-    makeVarsLexpsList (Snode (Snode (Ssym var1) [exp1]) (snode : snodes')) = 
-        case snode of
-            Snode (Ssym var2) [exp2] -> (var1, s2l exp1) : makeVarsLexpsList (Snode (Snode (Ssym var2) [exp2]) snodes')
-            _ -> error "Invalid letrec expression"
-    makeVarsLexpsList _ = error "Invalid letrec expression"
+  in Lrec varsExpsList (s2l sexp')
+    where
+        makeVarsLexpsList :: Sexp -> [(Var, Lexp)]
+        makeVarsLexpsList (Snode (Snode (Ssym var1) [exp1]) []) = [(var1, s2l exp1)]
+        makeVarsLexpsList (Snode (Snode (Ssym var1) [exp1]) (snode : snodes')) = 
+            case snode of
+                Snode (Ssym var2) [exp2] -> (var1, s2l exp1) : makeVarsLexpsList (Snode (Snode (Ssym var2) [exp2]) snodes')
+                _ -> error "Invalid letrec expression"
+        makeVarsLexpsList _ = error "Invalid letrec expression"
 -- Un appel de fonction (curried) (e ::= (e0 e1 e2 ... en))
 s2l (Snode e0 es) = Lfuncall (s2l e0) (map s2l es)
 s2l se = error ("Expression Slip inconnue: " ++ showSexp se)
@@ -355,9 +356,8 @@ eval s env (Lassign e1 e2) =
             in ((h', snd s''), v2)
         _ -> error "ce n'est pas une réference"
 
-
-
 eval s env (Lfuncall e0 es) = 
+    trace ("fonction appel: " ++ show e0 ++ " , arguments " ++ show es) $
     let (s', v0) = eval s env e0
     in case v0 of
         Vfun f -> 
@@ -383,17 +383,24 @@ eval s env (Ldec var e1 e2) = let (s', v1) = eval s env e1
                               in eval s' (madd env var v1) e2
 
 eval s env (Lrec bindings body) =
-    let (newState, newEnv) = foldl augmentEnv (s, env) bindings
-    in eval newState newEnv body
+    -- Étape 1: Créer un environnement initial avec des stubs pour les fonctions récursives.
+    let envWithStubs = foldl (\env' (var, _) -> madd env' var (Vfun (\_ -> error "Recursive call without body"))) env bindings
 
-augmentEnv :: (LState, Env) -> (Var, Lexp) -> (LState, Env)
-augmentEnv (s, env) (var, expr) =
-    let (newState, val) = eval s env expr
-    in (newState, madd env var val)
+        -- Étape 2: Remplacer les stubs par les vraies fermetures qui se référencent elles-mêmes.
+        envWithClosures = foldr (\(var, bindExpr) env' ->
+            let closure = Vfun (\(st', _) -> eval st' (madd env' var closure) bindExpr)
+            in madd env' var closure) envWithStubs bindings
 
+        -- Étape 3: Évaluer les expressions non fonctionnelles dans cet environnement.
+        evalNonFunctionals (env', st') (var, bindExpr) = case bindExpr of
+            Labs _ _ -> (env', st') -- Ignorer les fonctions, déjà traitées.
+            _ -> let (st'', val) = eval st' env' bindExpr in (madd env' var val, st'')
 
+        -- Étape 4: Construire l'environnement final avec les valeurs évaluées pour les non fonctionnelles.
+        (finalEnv, finalState) = foldl evalNonFunctionals (envWithClosures, s) bindings
 
-
+    -- Étape 5: Évaluer le corps du letrec dans l'environnement final.
+    in eval finalState finalEnv body
 
 ---------------------------------------------------------------------------
 -- Toplevel                                                              --
