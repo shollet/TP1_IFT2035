@@ -387,17 +387,9 @@ eval s env (Ldec var e1 e2) = let (s', v1) = eval s env e1
                               in eval s' (madd env var v1) e2
 
 eval s env (Lrec bindings body) =
-    -- Bind each variable to a thunk that represents its computation
     let extendedEnv = foldr (\(var, expr) env' -> madd env' var (Vthunk (\_ -> eval s extendedEnv expr))) env bindings
-    -- Evaluate the body in this environment
     in eval s extendedEnv body
-
-
-lazyEval :: LState -> Env -> Var -> Value
-lazyEval s env var = 
-    let (_, val) = eval s env (Lid var)
-    in val
-
+    
 ---------------------------------------------------------------------------
 -- Toplevel                                                              --
 ---------------------------------------------------------------------------
