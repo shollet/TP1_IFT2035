@@ -1,3 +1,5 @@
+-- Noms: Shayan Nicolas Hollet et Ahmed Mhedhbi
+
 -- TP-2  --- Implantation d'une sorte de Lisp          -*- coding: utf-8 -*-
 {-# OPTIONS_GHC -Wall #-}
 
@@ -389,7 +391,7 @@ eval s env (Ldec var e1 e2) = let (s', v1) = eval s env e1
 eval s env (Lrec bindings body) =
     let extendedEnv = foldr (\(var, expr) env' -> madd env' var (Vthunk (\_ -> eval s extendedEnv expr))) env bindings
     in eval s extendedEnv body
-    
+
 ---------------------------------------------------------------------------
 -- Toplevel                                                              --
 ---------------------------------------------------------------------------
