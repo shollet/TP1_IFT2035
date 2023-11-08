@@ -73,3 +73,6 @@
 (letrec ((f (λ x (if (= x 0) 0 (g (- x 1)))))
          (g (λ x (if (= x 0) 1 (f (- x 1))))))
   (f 10))                              ; ↝ 0
+
+  (letrec ((fib (λ n (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))))
+  (fib 10)) ; ↝ 55
