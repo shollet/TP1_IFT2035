@@ -279,7 +279,6 @@ data Value = Vnum Int
            | Vbool Bool
            | Vref Int
            | Vfun ((LState, Value) -> (LState, Value))
-           | Vthunk (LState -> (LState, Value))
 
 instance Show Value where
     showsPrec p (Vnum n) = showsPrec p n
