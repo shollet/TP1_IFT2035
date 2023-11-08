@@ -215,17 +215,11 @@ s2l (Snode (Ssym "if") [e1, e2, e3]) = Lite (s2l e1) (s2l e2) (s2l e3)
     -- Déclaration locale simple (e ::= (let x e1 e2))
 s2l (Snode (Ssym "let") [Ssym x, e1, e2]) = Ldec x (s2l e1) (s2l e2)
 -- Déclarations locales récursives (e ::= (letrec ((x1 e1) (x2 e2) ... (xn en)) e)
-s2l (Snode (Ssym "letrec") [snodes, sexp']) =
-  let varsExpsList = makeVarsLexpsList snodes
-  in Lrec varsExpsList (s2l sexp')
+s2l (Snode (Ssym "letrec") [Snode b bs, e]) = Lrec (bindings (b:bs)) (s2l e)
     where
-        makeVarsLexpsList :: Sexp -> [(Var, Lexp)]
-        makeVarsLexpsList (Snode (Snode (Ssym var1) [exp1]) []) = [(var1, s2l exp1)]
-        makeVarsLexpsList (Snode (Snode (Ssym var1) [exp1]) (snode : snodes')) =
-            case snode of
-                Snode (Ssym var2) [exp2] -> (var1, s2l exp1) : makeVarsLexpsList (Snode (Snode (Ssym var2) [exp2]) snodes')
-                _ -> error "Invalid letrec expression"
-        makeVarsLexpsList _ = error "Invalid letrec expression"
+        bindings [] = []
+        bindings ((Snode (Ssym x) [e']):bs') = (x, s2l e') : bindings bs'
+        bindings (b':_) = error ("mauvais bindings: " ++ show b')
 -- Un appel de fonction (curried) (e ::= (e0 e1 e2 ... en))
 s2l (Snode e0 es) = Lfuncall (s2l e0) (map s2l es)
 s2l se = error ("Expression Slip inconnue: " ++ showSexp se)
@@ -333,65 +327,38 @@ state0 :: LState
 state0 = (Hempty, 0)
 
 eval :: LState -> Env -> Lexp -> (LState, Value)
-
 eval s _env (Llit n) = (s, Vnum n)
-
-eval s env (Lid var) = 
-    case mlookup env var of
-        Vthunk thunk -> thunk s
-        value -> (s, value)
-
-
+eval s env (Lid var) = (s, mlookup env var)
 eval s env (Labs var e) = (s, Vfun (\(s',v) -> eval s' (madd env var v) e))
-
-eval (h, p) env (Lmkref e) =
-    let (_, v) = eval (h, p) env e
-    in ((hinsert h p v, p + 1), Vref p)
-
-eval s env (Lderef e) = let (s', v) = eval s env e
-                        in (s', case v of
-                                  Vref p -> case hlookup (fst s') p of
-                                              Just v' -> v'
-                                              Nothing -> error ("Pas de valeur pour la ref: " ++ show p)
-                                  _ -> error ("Pas une ref: " ++ show v))
-
+eval s env (Ldec var e1 e2) = let (s', v) = eval s env e1
+                              in eval s' (madd env var v) e2
+eval s env (Lite e1 e2 e3) = 
+    case eval s env e1 of
+        (s', Vbool True) -> eval s' env e2
+        (s', Vbool False) -> eval s' env e3
+        _ -> error ("ce n'est pas un booléen: " ++ show e1) 
+eval s env (Lderef e) = 
+    case eval s env e of
+        ((h', i), Vref p) -> case hlookup h' p of
+                                Just v -> ((h', i), v)
+                                Nothing -> error ("Pas de valeur pour la ref: " ++ show p)
+        _ -> error ("ce n'est pas une réference: " ++ show e)
 eval s env (Lassign e1 e2) =
-    let (s', v1) = eval s env e1
-    in case v1 of
-        Vref p ->
-            let (s'', v2) = eval s' env e2
-                h' = hinsert (fst s'') p v2
-            in ((h', snd s''), v2)
-        _ -> error "ce n'est pas une réference"
-
-eval s env (Lfuncall e0 es) =
-    let (s', v0) = eval s env e0
-    in case v0 of
-        Vfun f -> foldl (\(st, accFun) e ->
-                            let (st', v) = eval st env e
-                            in case accFun of
-                                 Vfun f' -> let (newSt, res) = f' (st', v)
-                                            in (newSt, res)
-                                 _ -> error "valeur non-connue"
-                       ) (s', Vfun f) es
-        _ -> error "ce n'est pas un appel de fonction"
-
-
-eval s env (Lite e1 e2 e3) =  let (s', v1) = eval s env e1
-                                  (s'', v2) = eval s' env e2
-                                  (s''', v3) = eval s'' env e3
-                              in (s''', case v1 of
-                                          Vbool True -> v2
-                                          Vbool False -> v3
-                                          _ -> error ("Pas un booléen: " ++ show v1))
-
-eval s env (Ldec var e1 e2) = let (s', v1) = eval s env e1
-                              in eval s' (madd env var v1) e2
-
-eval s env (Lrec bindings body) =
-    let extendedEnv = foldr (\(var, expr) env' -> madd env' var (Vthunk (\_ -> eval s extendedEnv expr))) env bindings
-    in eval s extendedEnv body
-
+    case eval s env e1 of
+        (s', Vref p) -> let ((h,i), v) = eval s' env e2 in ((hinsert h p v, i), v)
+        _ -> error ("ce n'est pas une réference: " ++ show e1)
+eval (h, i) env (Lmkref e) = ((hinsert h' i v, i'), Vref i)
+    where
+        ((h', i'), v) = eval (h, i+1) env e
+eval s env (Lfuncall e es) = foldl f (eval s env e) es
+    where
+        f (s', Vfun f') e' = f' (eval s' env e')
+        f _ _ = error ("ce n'est pas une fonction: " ++ show e)
+eval s env (Lrec bindings e) = eval s' env' e
+    where
+        (s', env') = foldr f (s,env) bindings
+        f (x, e') (z_s, z_env) = let (s'', v) = eval z_s env' e'  
+                                 in (s'', madd z_env x v)
 ---------------------------------------------------------------------------
 -- Toplevel                                                              --
 ---------------------------------------------------------------------------
